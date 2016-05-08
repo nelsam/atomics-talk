@@ -1,12 +1,9 @@
 #!/bin/bash
 
-echo Building binaries
-./build.sh
-echo
-
 run_benchmarks() {
     echo ====================================================
     echo GOMAXPROCS=$GOMAXPROCS
+    echo GOROUTINES=$GOROUTINES
     for file in $(ls *.go); do
         base=$(echo $file | cut -f1 -d.)
         echo Running $base
@@ -15,12 +12,21 @@ run_benchmarks() {
     done
 }
 
-export GOMAXPROCS=1
-run_benchmarks
-export GOMAXPROCS=2
-run_benchmarks
-export GOMAXPROCS=4
-run_benchmarks
+main() {
+    echo Building binaries
+    ./build.sh
+    echo
 
-echo Cleaning up
-./clean.sh
+    for i in 1 2 4 8; do
+        export GOMAXPROCS=$i
+        for j in 2 4 8; do
+            export GOROUTINES=$j
+            run_benchmarks
+        done
+    done
+
+    echo Cleaning up
+    ./clean.sh
+}
+
+main

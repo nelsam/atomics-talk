@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"strconv"
 	"sync"
 )
 
@@ -26,21 +28,31 @@ func loop(count int) {
 func main() {
 	var wg, writerWg sync.WaitGroup
 	change = make(chan int, 100)
-	wg.Add(1)
-	writerWg.Add(1)
 
+	goroutines, err := strconv.Atoi(os.Getenv("GOROUTINES"))
+	if err != nil {
+		panic(err)
+	}
+
+	writerWg.Add(1)
 	go func() {
 		for amount := range change {
 			value += amount
 		}
 		writerWg.Done()
 	}()
-	go func() {
-		loop(200000000)
-		wg.Done()
-	}()
-	loop(-100000000)
 
+	adders := goroutines - 1
+	wg.Add(adders)
+	delta := 200000000 / adders
+	remaining := 200000000 % adders
+	for i := 0; i < adders; i++ {
+		go func() {
+			loop(delta)
+			wg.Done()
+		}()
+	}
+	loop(-100000000 + remaining)
 	wg.Wait()
 	close(change)
 	writerWg.Wait()
