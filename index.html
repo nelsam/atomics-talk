@@ -230,7 +230,9 @@ sys	0m0.284s
 
 Still very slow. But why?
 
- - Lock contention (we are doing 300,000,000 Lock() and Unlock() calls).
+ - Lock overhead (we are doing 300,000,000 Lock() and Unlock() calls).
+
+Pizza example.
 
 ---
 
@@ -346,39 +348,56 @@ Why would you ever want to use channels or mutexes?
 
  - Firstly this was a contrived example.
  - Atomics are well suited for low level operations such as incrementing a counter.
+ - Not all syncronization operations can be accomplished with atomics without
+    building your own mutexes.
+
+---
+
+## When to use Mutexes
+
  - Mutexes are great for when you want to serialize large critical sections.
- - Mutexes have a trade off between tight locking and broad locking.
+ - Mutexes have a trade off when it comes to granularity.
     - Overly broad locks:
+        - Higher lock contention
+        - Lower lock overhead
         - If your workload is highly parallel then you can not do as much
-            work in parallel (pizza example)
+            work in parallel (Pizza example)
     - Overly tight locks:
-        - There is a higher risk of deadlocks due to programmer error
-        - There is much higher lock contention
- - Channels are not concurrency primitives, they are much higher level constructs.
- - Channels are great for modeling data flows and communication architectures at a higher level.
+        - Lower lock contention
+        - Higher lock overhead
+        - Higher risk of deadlocks due to programmer error
+
+---
+
+## When to use Channels
+
+ - Channels are not great for low level operations, they are much higher level constructs.
+ - Channels are great for modeling data flows and communication architectures.
+ - If you need a generic, thread safe queue, channels are great.
+ - If you want to use `select` or `reflect.Select` vs doing your own polling
+    channels are unfortunately your only option.
 
 ---
 
 ## Final Thoughts
 
- - Synchronization is far from free and should avoided if possible.
+ - Synchronization is far from free and should be avoided if possible.
  - The more work you can do in parallel without communication the better.
- - x86 architectures were not designed for synchronization to be fast.
+ - x86 architectures were not designed for synchronization to be extremely fast.
 
 ## Recommendations
 
  - Use channels where they make sense, don't force it.
- - When in doubt use `sync.Mutex` and lean towards locking more broadly.
- - Measure performance critical code using `testing.B` or Ginkgo's `Measure`.
- - Don't make decisions without data. These things can often be counterintuitive.
- - Run your benchmarks on multiple cores.
+ - When in doubt use `sync.Mutex` and lean towards locking more broadly to prevent deadlocks and locking overhead.
+ - Measure using `testing.B` or Ginkgo's `Measure`. Don't make decisions in the dark. These things can often be counterintuitive.
  - Use atomics when you need performance or if you are writing code that naturally lends itself to using atomics.
+ - Run your benchmarks on multiple cores w/ `GOMAXPROCS` set and run your test binaries on multiple architectures if you are targeting 
 
 ---
 
 class: center, middle
 
-# Thanks! Questions?
+# Thanks! Feedback? Questions?
 
 github.com/jasonkeene
 
