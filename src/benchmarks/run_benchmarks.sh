@@ -4,16 +4,16 @@ run_benchmarks() {
     echo ====================================================
     echo GOMAXPROCS=$GOMAXPROCS
     echo GOROUTINES=$GOROUTINES
-    for file in $(ls *.go); do
+    for file in $(ls **/*.go); do
         base=$(echo $file | cut -f1 -d.)
-        echo Running $base
+        echo running $base
         time ./$base
         echo
     done
 }
 
 main() {
-    echo Building binaries
+    echo building binaries
     ./build.sh
     echo
 
@@ -25,7 +25,7 @@ main() {
         done
     done
 
-    echo Cleaning up
+    echo cleaning up
     ./clean.sh
 }
 
