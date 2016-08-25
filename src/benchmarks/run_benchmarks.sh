@@ -17,9 +17,9 @@ main() {
     ./build.sh
     echo
 
-    for i in 1 2 4 8 16; do
+    for i in 1 2 4 8 16 24; do
         export GOMAXPROCS=$i
-        for j in 2 4 8 16; do
+        for j in 2 4 8 16 24; do
             export GOROUTINES=$j
             run_benchmarks
         done
