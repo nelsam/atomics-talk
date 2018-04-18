@@ -29,12 +29,10 @@ type Channel struct {
 	wcond    *sync.Cond
 	elements []float64
 	closed   uint32
-	rHead    int
-	wHead    int
 }
 
 func New(cap int) *Channel {
-	var r, w sync.Mutex
+	var r, w lock
 	return &Channel{
 		rcond:    sync.NewCond(&r),
 		wcond:    sync.NewCond(&w),
@@ -54,6 +52,9 @@ func (c *Channel) Send(v float64) {
 		c.rcond.L.Unlock()
 		c.wcond.Wait()
 		c.rcond.L.Lock()
+		if atomic.LoadUint32(&c.closed) == 1 {
+			panic("can not send on a closed channel")
+		}
 	}
 	c.elements = append(c.elements, v)
 	c.rcond.Signal()
@@ -62,10 +63,10 @@ func (c *Channel) Send(v float64) {
 func (c *Channel) Receive() float64 {
 	c.rcond.L.Lock()
 	defer c.rcond.L.Unlock()
-	if len(c.elements) == 0 && atomic.LoadUint32(&c.closed) == 1 {
-		return 0
-	}
 	for len(c.elements) == 0 {
+		if atomic.LoadUint32(&c.closed) == 1 {
+			return 0
+		}
 		c.rcond.Wait()
 	}
 	v := c.elements[0]
@@ -77,6 +78,8 @@ func (c *Channel) Receive() float64 {
 
 func (c *Channel) Close() {
 	atomic.StoreUint32(&c.closed, 1)
+	c.rcond.Broadcast()
+	c.wcond.Broadcast()
 }
 
 const depth = 10000000

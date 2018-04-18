@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>Atomic Superpowers!</title>
+<title>Communicate by Sharing Memory</title>
 <meta charset="utf-8">
 <style>
 
@@ -28,7 +28,9 @@ table td {
 table td i {
     color: red;
 }
-
+span.strike {
+    text-decoration: line-through;
+}
 </style>
 </head>
 <body>
@@ -36,8 +38,23 @@ table td i {
 
 class: center, middle
 
-# &#x269b;&#xfe0e; Atomic Superpowers!
-### and the costs of synchronization
+# Communicate by Sharing Memory
+## &#x269b;&#xfe0e; Atomics and Mutexes in Go
+
+---
+
+class: center, middle
+
+# Me
+
+Samuel Nelson<br>
+I work at Digital Ocean!<br>
+github.com/nelsam
+github.com/go-gorp
+
+Credit for the original slide deck<br>
+goes to Jason Keene, senior engineer<br>
+at Pivotal Software.
 
 ---
 
@@ -48,25 +65,56 @@ name: synchronizing
 Synchronization is serializing access to shared resources between
 multiple execution contexts (threads, OS processes, coroutines, etc).
 
-Pizza example.
-
-What are your options for synchronization in golang:
+Our options for synchronization in go:
 
  - `chan`
- - `sync.Mutex`
- - `atomic` pkg
- - <span class="strike">use cgo to call into all sorts of things</span>
- - <span class="strike">golang asm using ISA specific instructions</span>
+ - `sync`
+ - `atomic`
+ - use cgo to call into all sorts of things
+ - golang asm using ISA specific instructions
 
-Let's investigate <span id="someof" style="display:none;"><i>some of</i></span> these options.
+Let's investigate these options.
 
 ---
 
-## Introduction to the `atomic` Package
+name: synchronizing
 
-Everyone should be familiar with channels and mutexes.
+## Synchronization
 
-What does "atomic" mean?
+Synchronization is serializing access to shared resources between
+multiple execution contexts (threads, OS processes, coroutines, etc).
+
+Our options for synchronization in go:
+
+ - `chan`
+ - `sync`
+ - `atomic`
+ - <span class="strike">use cgo to call into all sorts of things</span>
+ - <span class="strike">golang asm using ISA specific instructions</span>
+
+Let's investigate <i>some of</i> these options.
+
+---
+
+## Reminder: channel primitive
+
+- `chan someType`
+
+---
+
+## Package overview: sync
+
+`sync` provides logic to claim and release locks.
+
+For the purposes of this talk, we care about:
+
+ - Mutex
+ - RWMutex
+ - Cond
+
+---
+
+## Package overview: atomic
 
 Atomic operations appear to the rest of the system to occur instantaneously.
 
@@ -77,7 +125,7 @@ Atomic operations fall into the [following categories](https://golang.org/pkg/sy
  - Swap
  - Compare and Swap (CAS)
 
-Some things to be aware of:
+Gotchas:
 
  - Byte alignment on 386_32 and ARM.
  - 64bit values on very old 32bit architectures.
@@ -90,28 +138,28 @@ A naive implementation of a concurrent counter:
 var value int
 
 func loop(count int) {
-	fmt.Printf("Started looping: %d\n", count)
-	amount := 1
-	if count < 0 {
-		count = -count
-		amount = -1
-	}
+    fmt.Printf("Started looping: %d\n", count)
+    amount := 1
+    if count < 0 {
+        count = -count
+        amount = -1
+    }
 
-	for i := 0; i < count; i++ {
-		value += amount
-	}
+    for i := 0; i < count; i++ {
+        value += amount
+    }
 }
 
 func main() {
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		loop(200000000)
-		wg.Done()
-	}()
-	loop(-100000000)
-	wg.Wait()
-	fmt.Printf("Resulting value: %d\n", value)
+    var wg sync.WaitGroup
+    wg.Add(1)
+    go func() {
+        loop(200000000)
+        wg.Done()
+    }()
+    loop(-100000000)
+    wg.Wait()
+    fmt.Printf("Resulting value: %d\n", value)
 }
 ```
 
@@ -125,9 +173,9 @@ Started looping: 10000000
 Started looping: 20000000
 Resulting value: 20238002
 
-real	0m0.067s
-user	0m0.087s
-sys	0m0.007s
+real    0m0.067s
+user    0m0.087s
+sys     0m0.007s
 ```
 
 Very fast but not correct, we must synchronize!
@@ -145,36 +193,36 @@ But why was the result not correct?
 
 Let's use channels:
 
-```go
+```diff
 +var change chan int
 
 @@ -16,18 +19,31 @@
- 	for i := 0; i < count; i++ {
--		value += amount
-+		change <- amount
- 	}
+    for i := 0; i < count; i++ {
+-       value += amount
++       change <- amount
+    }
  }
 
  func main() {
-	var wg sync.WaitGroup
-+	var writerWg sync.WaitGroup
-+	change = make(chan int, 100)
- 	wg.Add(1)
-+	writerWg.Add(1)
-+	go func() {
-+		for amount := range change {
-+			value += amount
-+		}
-+		writerWg.Done()
-+	}()
- 	go func() {
- 		loop(200000000)
- 		wg.Done()
- 	}()
- 	loop(-100000000)
- 	wg.Wait()
-+	close(change)
-+	writerWg.Wait()
+    var wg sync.WaitGroup
++   var writerWg sync.WaitGroup
++   change = make(chan int, 100)
+    wg.Add(1)
++   writerWg.Add(1)
++   go func() {
++       for amount := range change {
++           value += amount
++       }
++       writerWg.Done()
++   }()
+    go func() {
+        loop(200000000)
+        wg.Done()
+    }()
+    loop(-100000000)
+    wg.Wait()
++   close(change)
++   writerWg.Wait()
 ```
 
 ---
@@ -187,30 +235,30 @@ Started looping: -100000000
 Started looping: 200000000
 Resulting value: 100000000
 
-real	0m32.919s
-user	0m36.035s
-sys	0m3.274s
+real    0m32.919s
+user    0m36.035s
+sys     0m3.274s
 ```
 
-Correct result but super slow. I think a sloth could have counted faster. This is not an acceptable solution.
+Correct result but super slow.
 
 ---
 
 Let's add a tight mutex around the writes:
 
-```go
+```diff
 +var mu    sync.Mutex
 
  func loop(count int) {
- 	fmt.Printf("Started looping: %d\n", count)
+    fmt.Printf("Started looping: %d\n", count)
 @@ -16,7 +19,9 @@
- 	}
+    }
 
- 	for i := 0; i < count; i++ {
-+		mu.Lock()
- 		value += amount
-+		mu.Unlock()
- 	}
+    for i := 0; i < count; i++ {
++       mu.Lock()
+        value += amount
++       mu.Unlock()
+    }
  }
 ```
 
@@ -223,16 +271,14 @@ Started looping: -100000000
 Started looping: 200000000
 Resulting value: 100000000
 
-real	0m21.744s
-user	0m38.379s
-sys	0m0.284s
+real    0m21.744s
+user    0m38.379s
+sys     0m0.284s
 ```
 
 Still very slow. But why?
 
  - Lock overhead (we are doing 300,000,000 Lock() and Unlock() calls).
-
-Pizza example.
 
 ---
 
@@ -243,18 +289,18 @@ Let's use atomic addition:
 +var value int64
 
  func loop(count int) {
- 	fmt.Printf("Started looping: %d\n", count)
--	amount := 1
-+	amount := int64(1)
- 	if count < 0 {
- 		count = -count
- 		amount = -1
- 	}
+    fmt.Printf("Started looping: %d\n", count)
+-   amount := 1
++   amount := int64(1)
+    if count < 0 {
+        count = -count
+        amount = -1
+    }
 
- 	for i := 0; i < count; i++ {
--		value += amount
-+		atomic.AddInt64(&value, amount)
- 	}
+    for i := 0; i < count; i++ {
+-       value += amount
++       atomic.AddInt64(&value, amount)
+    }
  }
 ```
 
@@ -268,12 +314,12 @@ Started looping: -100000000
 Started looping: 200000000
 Resulting value: 100000000
 
-real	0m7.232s
-user	0m13.445s
-sys	0m0.027s
+real    0m7.232s
+user    0m13.445s
+sys     0m0.027s
 ```
 
-Not quite as slow, but still not great. Do we even need to synchronize these operations?
+Not quite as slow, but still not great.
 
 ---
 
@@ -281,16 +327,16 @@ Let's just do these mutations serially:
 
 ```go
  func main() {
--	var wg sync.WaitGroup
--	wg.Add(1)
--	go func() {
--		loop(200000000)
--		wg.Done()
--	}()
-+	loop(200000000)
- 	loop(-100000000)
--	wg.Wait()
- 	fmt.Printf("Resulting value: %d\n", value)
+-   var wg sync.WaitGroup
+-   wg.Add(1)
+-   go func() {
+-       loop(200000000)
+-       wg.Done()
+-   }()
++   loop(200000000)
+    loop(-100000000)
+-   wg.Wait()
+    fmt.Printf("Resulting value: %d\n", value)
  }
 ```
 
@@ -304,9 +350,9 @@ Started looping: 200000000
 Started looping: -100000000
 Resulting value: 100000000
 
-real	0m0.733s
-user	0m0.708s
-sys	0m0.011s
+real    0m0.733s
+user    0m0.708s
+sys     0m0.011s
 ```
 
 ---
@@ -342,40 +388,127 @@ _Ran on a 4 core single socket x86_64._
 
 ---
 
-## Why use channels or mutexes?
+# The cost of synchronization
 
-Why would you ever want to use channels or mutexes?
+ - Clearly a contrived example, but locking is expensive
+ - This is, in essence, "parallel" but not "concurrent"
+   - Executing on multiple cores
+   - Not designed to spread the load
+ - Channels are slow
 
- - Firstly this was a contrived example.
- - Atomics are well suited for low level operations such as incrementing a counter.
- - Not all syncronization operations can be accomplished with atomics without
-    building your own mutexes.
+---
+
+## Since channels are so awful, let's just replace them with atomics!
+
+```go
+type lock uint32
+
+func (l *lock) Lock() {
+    for !atomic.CompareAndSwapUint32(&c.locked, 0, 1) {
+        runtime.Gosched()
+    }
+}
+
+func (l *lock) Unlock() {
+    atomic.StoreUint32(&c.locked, 0)
+}
+```
+
+---
+
+```go
+type Channel struct {
+    l        lock
+    elements []float64
+    closed   uint32
+}
+
+func (c *Channel) Send(v []byte) {
+    for !c.trySend(v) {
+        runtime.Gosched()
+    }
+}
+
+func (c *Channel) trySend(v float64) bool {
+    if atomic.LoadUint32(&c.closed) == 1 {
+        panic("can not send on a closed channel")
+    }
+    c.l.Lock()
+    defer c.l.Unlock()
+    if len(c.elements) == cap(c.elements) {
+        return false
+    }
+    c.elements = append(c.elements, v)
+    return true
+}
+```
+
+---
+
+## First, a baseline
+
+```
+$ time GOROUTINES=10 go run channel.go
+total: +1.604671e+007
+GOROUTINES=10 go run channel.go  2.98s user 0.10s system 184% cpu 1.668 total
+```
+
+---
+
+```
+$ time GOROUTINES=10 go run worst_channel.go
+total: +1.604671e+007
+done
+GOROUTINES=10 go run worst_channel.go  16.38s user 0.08s system 365% cpu 4.498 total
+```
+## Oh...
+
+Maybe if we add some `sync.Cond`?
+```
+$ time GOROUTINES=10 go run worse_channel.go
+total: +1.604671e+007
+done
+GOROUTINES=10 go run worse_channel.go  21.03s user 0.11s system 368% cpu 5.744 total
+```
+## Ouch...
+How about just plain `sync.Mutex` instead of the atomic lock?
+```
+$ time GOROUTINES=10 go run bad_channel.go
+total: +1.604671e+007
+done
+GOROUTINES=10 go run bad_channel.go  14.09s user 0.11s system 275% cpu 5.149 total
+```
+## Yikes...
+
+---
+
+# Takeaway
+
+ - Channels do a lot of work for you
+ - Mutexes do a reasonable amount of work for you
+ - Work comes at a cost
 
 ---
 
 ## When to use Mutexes
 
- - Mutexes are great for when you want to serialize large critical sections.
- - Mutexes have a trade off when it comes to granularity.
+ - Serializing larger critical sections.
+ - Granularity tradeoff
     - Overly broad locks:
         - Higher lock contention
         - Lower lock overhead
-        - If your workload is highly parallel then you can not do as much
-            work in parallel (Pizza example)
+        - Lower risk
     - Overly tight locks:
         - Lower lock contention
         - Higher lock overhead
-        - Higher risk of deadlocks due to programmer error
+        - Higher risk
 
 ---
 
 ## When to use Channels
 
- - Channels are not great for low level operations, they are much higher level constructs.
- - Channels are great for modeling data flows and communication architectures.
- - If you need a generic, thread safe queue, channels are great.
- - If you want to use `select` or `reflect.Select` vs doing your own polling
-    channels are unfortunately your only option.
+ - Thread-safe queue
+ - Resource usage needs to be lower
 
 ---
 
@@ -389,9 +522,9 @@ Why would you ever want to use channels or mutexes?
 
  - Use channels where they make sense, don't force it.
  - When in doubt use `sync.Mutex` and lean towards locking more broadly to prevent deadlocks and locking overhead.
- - Measure using `testing.B` or Ginkgo's `Measure`. Don't make decisions in the dark. These things can often be counterintuitive.
+ - Measure using `testing.B`. Don't make decisions in the dark. These things can often be counterintuitive.
  - Use atomics when you need performance or if you are writing code that naturally lends itself to using atomics.
- - Run your benchmarks on multiple cores w/ `GOMAXPROCS` set and run your test binaries on multiple architectures if you are targeting 
+ - Run your benchmarks on multiple cores w/ `GOMAXPROCS` set and run your test binaries on multiple architectures if you are targeting
 
 ---
 
@@ -401,20 +534,19 @@ class: center, middle
 
 github.com/jasonkeene
 
+---
+
+class: center, middle
+
+# Thanks! Feedback? Questions?
+
+<span class="strike">github.com/jasonkeene</span><br>github.com/nelsam
+
 </textarea>
 <script src="https://gnab.github.io/remark/downloads/remark-latest.min.js">
 </script>
 <script>
-var slideshow = remark.create(),
-    strikeEls = document.querySelectorAll('.strike'),
-    someofEl = document.getElementById('someof');
-function noAsm() {
-    for (var i = 0; i < strikeEls.length; i++) {
-        strikeEls[i].style.textDecoration = 'line-through';
-    }
-    someofEl.style.display = 'inline';
-}
-document.getElementById('slide-synchronizing').onclick = noAsm;
+remark.create()
 </script>
 </body>
 </html>

@@ -25,54 +25,55 @@ func (l *lock) Unlock() {
 }
 
 type Channel struct {
-	rcond    *sync.Cond
-	wcond    *sync.Cond
+	l        lock
 	elements []float64
 	closed   uint32
-	rHead    int
-	wHead    int
 }
 
 func New(cap int) *Channel {
-	var r, w sync.Mutex
 	return &Channel{
-		rcond:    sync.NewCond(&r),
-		wcond:    sync.NewCond(&w),
 		elements: make([]float64, 0, cap),
 	}
 }
 
 func (c *Channel) Send(v float64) {
+	for !c.trySend(v) {
+		runtime.Gosched()
+	}
+}
+
+func (c *Channel) trySend(v float64) bool {
 	if atomic.LoadUint32(&c.closed) == 1 {
 		panic("can not send on a closed channel")
 	}
-	c.wcond.L.Lock()
-	defer c.wcond.L.Unlock()
-	c.rcond.L.Lock()
-	defer c.rcond.L.Unlock()
-	for len(c.elements) == cap(c.elements) {
-		c.rcond.L.Unlock()
-		c.wcond.Wait()
-		c.rcond.L.Lock()
+	c.l.Lock()
+	defer c.l.Unlock()
+	if len(c.elements) == cap(c.elements) {
+		return false
 	}
 	c.elements = append(c.elements, v)
-	c.rcond.Signal()
+	return true
 }
 
 func (c *Channel) Receive() float64 {
-	c.rcond.L.Lock()
-	defer c.rcond.L.Unlock()
-	if len(c.elements) == 0 && atomic.LoadUint32(&c.closed) == 1 {
-		return 0
+	v, found, closed := c.tryReceive()
+	for !found && !closed {
+		runtime.Gosched()
+		v, found, closed = c.tryReceive()
 	}
-	for len(c.elements) == 0 {
-		c.rcond.Wait()
+	return v
+}
+
+func (c *Channel) tryReceive() (v float64, found, closed bool) {
+	c.l.Lock()
+	defer c.l.Unlock()
+	if len(c.elements) == 0 {
+		return 0, false, atomic.LoadUint32(&c.closed) == 1
 	}
-	v := c.elements[0]
+	v = c.elements[0]
 	copy(c.elements, c.elements[1:])
 	c.elements = c.elements[:len(c.elements)-1]
-	c.wcond.Signal()
-	return v
+	return v, true, false
 }
 
 func (c *Channel) Close() {
